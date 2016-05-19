@@ -1,0 +1,30 @@
+{
+  "name": "react-intl-modules-loader",
+  "version": "0.0.1",
+  "description": "A more scalable way of defining react-intl messages.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/asztal/react-intl-modules-loader.git"
+  },
+  "keywords": [
+    "i18n",
+    "webpack",
+    "react",
+    "react-intl"
+  ],
+  "author": "Lee Houghton <lee@asztal.net>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/asztal/react-intl-modules-loader/issues"
+  },
+  "homepage": "https://github.com/asztal/react-intl-modules-loader#readme",
+  "dependencies": {
+    "dive": "^0.5.0",
+    "fs-promise": "^0.5.0",
+    "loader-utils": "^0.2.15"
+  }
+}
