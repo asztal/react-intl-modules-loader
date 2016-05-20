@@ -4,6 +4,7 @@ const Path = require("path");
 const LoaderUtils = require("loader-utils");
 const FS = require("fs");
 
+// When shortening prefixes
 let sequence = 1;
 const prefixMap = {};
 
