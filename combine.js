@@ -1,6 +1,14 @@
+/* eslint-env commonjs */
+
 /**
- * TODO This needs some serious documenting! 
+ * Takes the result of a call to Webpack's `require.context` and merges together
+ * all of the messages. 
  */
-module.exports = function(context) {
-    return context.keys().map(context.resolve.bind(context)).reduce({}, Object.assign);
+module.exports = function(req) {
+    return req
+       .keys()
+       .map(req) // Get all the messages for each module
+       .reduce(function(result, messages) {
+           return Object.assign(result, messages);
+       }, {});
 };
