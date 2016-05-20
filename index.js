@@ -7,61 +7,89 @@ const FS = require("fs");
 let sequence = 1;
 const prefixMap = {};
 
+/**
+ * The default behaviour of this loader is to take a single file and return the
+ * IDs of the messages contained within it. The loader ensures that the returned
+ * IDs are unique by prefixing them with the file's path relative to the root. 
+ * 
+ * @param source {string} - The JSON source of the messages file being required.
+ */
 module.exports = function(source) {
     this.cacheable && this.cacheable();
     
-    const config = LoaderUtils.getLoaderConfig(this, "reactIntlModules");
-    const prefix = getShortPrefix(this.options.context, this.resourcePath);
-    
-    //console.log("req", this.resourcePath, config);
-    
-    if (config.lang)
-        throw new Error("pitch didn't work")
-    
-    // If the lang parameter is passed, return the messages as a flattened
-    // object suitable for passing to <IntlProvider messages={data}>.
-    const data = config.lang
-        ? getMessages.call(this, source, prefix, config.lang)
-        : getIDs.call(this, source, prefix);
-        
-    const js = "/*locale*/ module.exports = " + JSON.stringify(data) + ";";
-    return js;
+    return toJS(getIDs.call(this, source));
 };
 
+/**
+ * The other behaviour of this loader is to take an entire directory and 
+ * collate together all the messages for a particular language. E.g. find
+ * all .intl.json files with an English language and gather all the messages:
+ * 
+ * combine(require.context("react-intl-modules-loader?lang=en!./", 
+ *                          true, /en\.intl\.json$/))
+ * 
+ * (Where `combine` is a function that takes a Webpack context module, requires
+ * all the contents, and merges them into a single object)
+ * 
+ * This only happens when loader's the ?lang query parameter is set.
+ * 
+ * This is done using module.exports.pitch so that we can read the raw JSON 
+ * rather than the JS output already processed by this loader, which is what
+ * we would normally get.
+ */
 module.exports.pitch = function() {
-    const config = LoaderUtils.getLoaderConfig(this, "reactIntlModules");
+    this.cacheable && this.cacheable();
+    
+    const config = getConfig.call(this);
     if (!config.lang) 
         return;
     
     const callback = this.async();
-    const prefix = getShortPrefix(this.options.context, this.resourcePath);
-    
     FS.readFile(this.resourcePath, function(err, buffer) {
         if (err)
             return callback(err);
         
         try {
             const source = buffer.toString("utf8");
-            const data = getMessages.call(this, source, prefix, config.lang);
-            const js = "/*locale*/ module.exports = " + JSON.stringify(data) + ";";
-            callback(null, js);
+            callback(null, toJS(getMessages.call(this, source, config)));
         } catch(err) {
             callback(err);
         }
     }.bind(this));
+};
+
+/**
+ * Converts a JSON object to a JavaScript CommonJS module which exports it.
+ * 
+ * @param {object} json - The JSON object to convert. It doesn't technically
+ *                        have to be an object, but it will be in our case. 
+ */
+function toJS(json) {
+    return "/*locale*/ module.exports = " + JSON.stringify(json) + ";";
 }
 
 /**
  * Returns a unique prefix specific to the intl module being loaded. This allows
  * messages to be unique.
- * @param root {string} - The root of the webpack compilation, i.e. 
- *                        options.context from the webpack config.
- * @param file {string} - The absolute file path of the intl module.
+ * 
+ * If `config.shorten` is truthy, the prefix will be shortened but still kept
+ * unique. 
+ * 
+ * This should be called with the Webpack loader context as the `this` object. 
+ * 
+ * @param {object} config - The Webpack loader config.
+ * @param {boolean} config.shorten - If truthy, the prefix will be shortened but 
+ * still kept unique. This is disabled by default because this then makes the 
+ * output dependent on the compilation order, which is an undesirable property 
+ * if you rely on build hashes.
  */
-function getShortPrefix(root, file) {
+function getPrefix(config) {
     const prefix = 
-        Path.relative(root, file)
+        Path.relative(this.options.context, this.resourcePath)
             .replace(/\\/g, "/"); // Crude attempt at normalisation
+            
+    if (!config.shorten)
+        return prefix;
             
     return prefixMap[prefix] = prefixMap[prefix] || sequence++;
 }
@@ -72,7 +100,7 @@ function getShortPrefix(root, file) {
  * The source should be a JSON object with a @locale property and some nested
  * string fields. Other types of field are not allowed.
  * 
- * @param source {string} - The source string passed in by Webpack.
+ * @param {string} source - The source string passed in by Webpack.
  */
 function parseSource(source) {
     const json = JSON.parse(source);
@@ -97,14 +125,29 @@ function parseSource(source) {
     return json;
 }
 
+/**
+ * Gets the loader config.
+ * 
+ * This should be called with the Webpack loader context as the `this` object. 
+ */
+function getConfig() {
+    return LoaderUtils.getLoaderConfig(this, "reactIntlModules");
+}
+
 /** 
  * Process all locale files of a particular language within the current directory.
- * @param lang {string} - The locale to return. Any .intl.json files will be
- *                        ignored if their `@locale` property does not match this. 
+ * The language selected is specified by {@link config.lang}.
+ * 
+ * @param {string} source - The raw JSON contents of the module being loaded. 
+ * @param {string} config - The Webpack loader config.
+ * @param {string} config.lang - The locale to select.
+ * 
+ * This should be called with the Webpack loader context as the `this` object. 
  */
-function getMessages(source, prefix, lang) {
+function getMessages(source, config) {
     const json = parseSource(source);
-    if (json["@locale"] !== lang)
+    const prefix = getPrefix.call(this, config);
+    if (json["@locale"] !== config.lang)
         return {};
         
     return convert(json, prefix)["@messages"];
@@ -113,9 +156,14 @@ function getMessages(source, prefix, lang) {
 /** 
  * Converts a single file to JavaScript. 
  * 
- * Replaces message names with unique message ids in the same nested structure. */
-function getIDs(source, prefix) {
+ * Replaces message names with unique message ids in the same nested structure. 
+ * 
+ * @param {string} source - The source file's contents.
+ * */
+function getIDs(source) {
     const json = parseSource(source);
+    const prefix = getPrefix.call(this, getConfig.call(this));
+    
     let converted = convert(json, prefix);
     delete converted["@messages"]; // Save space in the resulting output.
     
@@ -130,8 +178,8 @@ function getIDs(source, prefix) {
  * The returned value also has an "@messages" property which includes the 
  * actual messages. 
  * 
- * @param obj {object} - The raw JSON data for the locale.
- * @param prefix {string} - The unique prefix for this all keys in this module. 
+ * @param {object} obj - The JSON object with the messages in.
+ * @param {string} prefix - The unique prefix for keys in this module. 
  * */
 function convert(obj, prefix) {
     function go(result, obj, path) {
