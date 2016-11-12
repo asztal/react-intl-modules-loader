@@ -62,7 +62,7 @@ module.exports.pitch = function() {
 /**
  * Converts a JSON object to a JavaScript CommonJS module which exports it.
  * 
- * @param {object} json - The JSON object to convert. It doesn't technically
+ * @param {Object} json - The JSON object to convert. It doesn't technically
  *                        have to be an object, but it will be in our case. 
  */
 function toJS(json) {
@@ -78,7 +78,7 @@ function toJS(json) {
  * 
  * This should be called with the Webpack loader context as the `this` object. 
  * 
- * @param {object} config - The Webpack loader config.
+ * @param {Object} config - The Webpack loader config.
  * @param {boolean} config.shorten - If truthy, the prefix will be shortened but 
  * still kept unique. This is disabled by default because this then makes the 
  * output dependent on the compilation order, which is an undesirable property 
@@ -110,6 +110,9 @@ function parseSource(source) {
     
     function check(obj, path) {
         for (let key in obj) {
+            // TODO Maybe validate that top-level keys are valid 
+            // locales, or at least look like them
+            
             switch(typeof obj[key]) {
                 case "string": break;
                 case "object": check(obj[key], path + "." + key); break;
@@ -119,10 +122,8 @@ function parseSource(source) {
             }
         }
     }
-    check(json, "data");
+    check(json, "root");
     
-    if (typeof json["@locale"] !== "string")
-        throw new Error("Locale JSON must include an @locale property");
     return json;
 }
 
@@ -148,10 +149,13 @@ function getConfig() {
 function getMessages(source, config) {
     const json = parseSource(source);
     const prefix = getPrefix.call(this, config);
-    if (json["@locale"] !== config.lang)
+    
+    if (!json[config.lang]) {
+        this.emitWarning("No messages defined for language " + config.lang);
         return {};
+    }
         
-    return convert(json, prefix)["@messages"];
+    return convert(json[config.lang], prefix).messages;
 }
 
 /** 
@@ -165,42 +169,47 @@ function getIDs(source) {
     const json = parseSource(source);
     const prefix = getPrefix.call(this, getConfig.call(this));
     
-    let converted = convert(json, prefix);
-    delete converted["@messages"]; // Save space in the resulting output.
-    
-    return converted;
+    // I'm biased. Assume the English locale will contain all required 
+    // messages.
+    let lang = json.en ? "en" : Object.keys(json)[0];
+    if (!lang)
+        return {};
+        
+    return convert(json[lang], prefix).ids;
 }
 
 /** 
  * Returns the input with all locale strings replaced with their identifiers.
- *  
- * TODO: Example of how it transforms the input
  * 
  * The returned value also has an "@messages" property which includes the 
  * actual messages. 
  * 
- * @param {object} obj - The JSON object with the messages in.
+ * @param {Object} root - The JSON object with the messages in.
  * @param {string} prefix - The unique prefix for keys in this module. 
  * */
-function convert(obj, prefix) {
-    function go(result, obj, path) {
+function convert(root, prefix) {
+    let messages = {};
+    
+    function toIDs(obj, path) {
+        let result = {};
+        
         for (let key in obj) {
             if (key[0] == "@")
                 continue;
 
             const value = obj[key];
             if (typeof value === "object") {
-                go(result, obj[key], path + key + ".");
+                result[key] = toIDs(obj[key], path + key + ".");
             } else {
-                result[path + key] = value;
-                obj[key] = path + key;
+                messages[path + key] = value;
+                result[key] = path + key;
             }
         }
-        return obj;
+        
+        return result;
     }
     
-    let flat = {};
-    obj = go(flat, obj, prefix + ":");
-    obj["@messages"] = flat;
-    return obj;
+    const ids = root ? toIDs(root, prefix + ":") : {};
+        
+    return { ids, messages };
 }
