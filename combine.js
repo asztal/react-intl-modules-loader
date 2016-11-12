@@ -6,9 +6,9 @@
  */
 module.exports = function(req) {
     return req
-       .keys()
-       .map(req) // Get all the messages for each module
-       .reduce(function(result, messages) {
-           return Object.assign(result, messages);
-       }, {});
+        .keys()
+        .map(req) // Get all the messages for each module
+        .reduce(function(result, messages) {
+            return Object.assign(result, messages);
+        }, {});
 };
