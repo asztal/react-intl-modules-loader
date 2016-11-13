@@ -2,7 +2,6 @@
 
 const Path = require("path");
 const LoaderUtils = require("loader-utils");
-const FS = require("fs");
 
 // When shortening prefixes
 let sequence = 1;
@@ -13,61 +12,21 @@ const prefixMap = {};
  * IDs of the messages contained within it. The loader ensures that the returned
  * IDs are unique by prefixing them with the file's path relative to the root. 
  * 
+ * Adds a hash of the input to the generated JavaScript so that webpack will know 
+ * that the file has actually been edited. (This is necessary because although the
+ * primary loader output may not change as a result of changing the values, it would
+ * change when using the ?lang option with require.context, but Webpack seems to 
+ * assume that it won't because the primary output didn't change.)
+ * 
  * @param source {string} - The JSON source of the messages file being required.
  */
 module.exports = function(source) {
     this.cacheable && this.cacheable();
-    
-    return toJS(getIDs.call(this, source));
-};
 
-/**
- * The other behaviour of this loader is to take an entire directory and 
- * collate together all the messages for a particular language. E.g. find
- * all .intl.json files with an English language and gather all the messages:
- * 
- * combine(require.context("react-intl-modules-loader?lang=en!./", 
- *                          true, /en\.intl\.json$/))
- * 
- * (Where `combine` is a function that takes a Webpack context module, requires
- * all the contents, and merges them into a single object)
- * 
- * This only happens when loader's the ?lang query parameter is set.
- * 
- * This is done using module.exports.pitch so that we can read the raw JSON 
- * rather than the JS output already processed by this loader, which is what
- * we would normally get.
- */
-module.exports.pitch = function() {
-    this.cacheable && this.cacheable();
-    
     const config = getConfig.call(this);
-    if (!config.lang) 
-        return;
-    
-    const callback = this.async();
-    FS.readFile(this.resourcePath, function(err, buffer) {
-        if (err)
-            return callback(err);
-        
-        try {
-            const source = buffer.toString("utf8");
-            callback(null, toJS(getMessages.call(this, source, config)));
-        } catch(err) {
-            callback(err);
-        }
-    }.bind(this));
+    return compile.call(this, source, config);
 };
 
-/**
- * Converts a JSON object to a JavaScript CommonJS module which exports it.
- * 
- * @param {Object} json - The JSON object to convert. It doesn't technically
- *                        have to be an object, but it will be in our case. 
- */
-function toJS(json) {
-    return "/*locale*/ module.exports = " + JSON.stringify(json) + ";";
-}
 
 /**
  * Returns a unique prefix specific to the intl module being loaded. This allows
@@ -98,15 +57,16 @@ function getPrefix(config) {
 /**
  * Parses the source into JSON and verifies its structure.
  * 
- * The source should be a JSON object with a @locale property and some nested
+ * The source should be a JSON object nested
  * string fields. Other types of field are not allowed.
  * 
  * @param {string} source - The source string passed in by Webpack.
  */
 function parseSource(source) {
-    const json = JSON.parse(source);
+    const json = this.exec(source, this.resourcePath);
+
     if (typeof json !== "object")
-        throw new Error("Locale JSON must be an object");
+        throw new Error("Locale data must be an object");
     
     function check(obj, path) {
         for (let key in obj) {
@@ -137,79 +97,51 @@ function getConfig() {
 }
 
 /** 
- * Process all locale files of a particular language within the current directory.
- * The language selected is specified by {@link config.lang}.
+ * Converts a single file to an ECMAScript module. 
  * 
- * @param {string} source - The raw JSON contents of the module being loaded. 
- * @param {string} config - The Webpack loader config.
- * @param {string} config.lang - The locale to select.
+ * Replaces message names with unique message ids in the same nested structure,
+ * which is exported as the default export.
  * 
- * This should be called with the Webpack loader context as the `this` object. 
- */
-function getMessages(source, config) {
-    const json = parseSource(source);
-    const prefix = getPrefix.call(this, config);
-    
-    if (!json[config.lang]) {
-        this.emitWarning("No messages defined for language " + config.lang);
-        return {};
-    }
-        
-    return convert(json[config.lang], prefix).messages;
-}
-
-/** 
- * Converts a single file to JavaScript. 
- * 
- * Replaces message names with unique message ids in the same nested structure. 
+ * Each language is exported as an object mapping message IDs to actual strings
+ * in that language. 
  * 
  * @param {string} source - The source file's contents.
  * */
-function getIDs(source) {
-    const json = parseSource(source);
+function compile(source, config) {
+    const json = parseSource.call(this, source);
     const prefix = getPrefix.call(this, getConfig.call(this));
     
-    // I'm biased. Assume the English locale will contain all required 
-    // messages.
-    let lang = json.en ? "en" : Object.keys(json)[0];
-    if (!lang)
-        return {};
-        
-    return convert(json[lang], prefix).ids;
-}
+    let ids = {};
+    let langs = {};
 
-/** 
- * Returns the input with all locale strings replaced with their identifiers.
- * 
- * The returned value also has an "@messages" property which includes the 
- * actual messages. 
- * 
- * @param {Object} root - The JSON object with the messages in.
- * @param {string} prefix - The unique prefix for keys in this module. 
- * */
-function convert(root, prefix) {
-    let messages = {};
-    
-    function toIDs(obj, path) {
-        let result = {};
+    function convert(obj, path) {
+        let ids = {};
+        let values = {};
         
         for (let key in obj) {
-            if (key[0] == "@")
-                continue;
-
             const value = obj[key];
             if (typeof value === "object") {
-                result[key] = toIDs(obj[key], path + key + ".");
+                const nested = convert(obj[key], path + key + ".");
+                ids[key] = nested.ids;
+                Object.assign(values, nested.values);
             } else {
-                messages[path + key] = value;
-                result[key] = path + key;
+                ids[key] = path + key;
+                values[path + key] = value;
             }
         }
         
-        return result;
+        return { ids, values };
     }
-    
-    const ids = root ? toIDs(root, prefix + ":") : {};
+
+    for (let lang in json) {
+        let converted = convert(json[lang], prefix + ":");
+        langs[lang] = converted.values;
+        Object.assign(ids, converted.ids); 
+    }
         
-    return { ids, messages };
+    return [
+        ...Object.keys(ids).map(key =>
+            "export const " + key + "=" + JSON.stringify(ids[key])),
+        "export const $messages = " + JSON.stringify(langs)
+    ].join(";");
 }

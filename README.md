@@ -44,6 +44,8 @@ something like:
     }
 ```
 
+## Structure
+
 Notice how the structure of the JSON is preserved. 
 
 You can shorten the module prefixes by setting `shorten` to true in the loader 
@@ -56,7 +58,7 @@ buttons.
     // src/components/ActionButtons/index.js
     import React from "react";
     import {FormattedMessage} from "react-intl";
-    import messages from "./intl.json";
+    import * as messages from "./intl.json";
     
     export class ActionButton extends React.Component {
         static propTypes = {
@@ -102,17 +104,13 @@ combine all your intl modules into one:
     import combine from "react-intl-modules-loader/combine";
     import {IntlProvider} from "react-intl";
     
-    const locales = {
-        // Require all intl.json files in the project, take the `en`
-        // messages from each, and combine them into a single dictionary
-        // of messages.
-        en: combine(
-                require.context(
-                    "react-intl-modules-loader?lang=en!./",
-                    true, // Recurse into subdirectories
-                    /intl\.json$/)),
-        fr: combine(require.context("react-intl-modules-loader?lang=fr!./",
-                                    true, /intl\.json$/))
+    const locales = combine(
+        // Require all intl.json files in the project, take the messages from each, 
+        // and combine them into a single dictionary of messages.
+        require.context(
+            "./",
+            true, // Recurse into subdirectories
+            /intl\.json$/)); // Or whatever you want to call your intl files.
     };
     
     export default (props) => 
@@ -120,3 +118,82 @@ combine all your intl modules into one:
             {props.children}
         </IntlProvider>;
 ```
+## Suggested configuration
+
+To load JSON files, you could put this into your Webpack 2 `module.rules`:
+
+```js
+            {
+                test: /^intl\.json$/,
+                exclude: /node_modules/,
+                use: [
+                    {
+                        loader: "react-intl-modules-loader"
+                    },
+                    {
+                        loader: "json-loader"
+                    }
+                ]
+            },
+```
+
+To load plain JavaScript i18n files, you could put this into your `module.rules`:
+
+```js
+            {
+                test: /^intl\.js$/,
+                exclude: /node_modules/,
+                use: [
+                    {
+                        loader: "react-intl-modules-loader"
+                    }
+                ]
+            },
+```
+
+## Loading non-JSON i18n files
+
+In the spirit of Webpack, this loader does as little as possible.
+Originally, it parsed the JSON file for you. Now, that is optional, and can 
+be done by chaining with `json-loader`. This allows for more complex scenarios
+such as sharing strings between components, and comments in your i18n files.
+
+```js
+    // src/components/intl.js (global/common i18n strings)
+    export const en = {
+        retry: "Retry"
+    };
+```
+
+```js
+    // src/components/Widget/intl.js
+    import * as Global from "../intl.js";
+
+    export const en = {
+        save: {
+            default: "Save",
+            busy: "Saving…",
+            retry: Global.en.retry
+        },
+        send: {
+            default: "Send",
+            busy: "Sending…",
+            retry: Global.en.retry
+        }
+    };
+```
+
+```js
+    // src/components/Widget/index.js
+    import {save, send} from "react-intl-modules-loader!./intl.js";
+
+    ...
+
+    <ActionButton messages={send}/> 
+```
+
+## Splitting
+
+You don't have to define all of your different languages in the same file,
+as long as one of those language files has all the necessary keys. The 
+`combine` helper will merge all the files correctly.
