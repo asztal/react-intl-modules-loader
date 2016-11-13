@@ -3,22 +3,53 @@
 const Path = require("path");
 const LoaderUtils = require("loader-utils");
 
-// When shortening prefixes
+/** 
+ * @typedef {Object} WebpackConfig
+ * @property {string} context
+ *  The root path of the project, essentially.
+ *  Relative paths in the webpack config object are considered to be relative to this. 
+ */
+
+/** 
+ * @typedef {Object} WebpackLoaderContext
+ * @property {WebpackConfig} options - The webpack configuration object.
+ * @property {function} cacheable - Marks the loader as cacheable.
+ * @property {function} exec - Executes a piece of JavaScript as a module.
+ * @property {string} resourcePath - The path of the module being required.
+ */ 
+
+/** 
+ * @typedef {Object} LoaderConfig
+ * @property {boolean} shorten
+ *  If true, shorten prefixes generated instead of using a full relative path. 
+ *  This should be avoided because it is non-deterministic depending on the 
+ *  order in which the files are compiled.
+ */ 
+
+/**
+ * @type {number} 
+ * When shortening prefixes, the next prefix number that will be used. 
+ */ 
 let sequence = 1;
+
+/**
+ * @type {Object.<string, number>} 
+ * When shortening prefixes, a list of prefixes that have already been 
+ * mapped to a short prefix. 
+ */
 const prefixMap = {};
 
 /**
- * The default behaviour of this loader is to take a single file and return the
- * IDs of the messages contained within it. The loader ensures that the returned
- * IDs are unique by prefixing them with the file's path relative to the root. 
+ * Takes a single i18n file and returns a JavaScript module that generates 
+ * globally-unique keys for nested strings, and exports those keys in the 
+ * same structure as the input file, also exporting a $messages export with
+ * the actual values of these messages in particular languages.
  * 
- * Adds a hash of the input to the generated JavaScript so that webpack will know 
- * that the file has actually been edited. (This is necessary because although the
- * primary loader output may not change as a result of changing the values, it would
- * change when using the ?lang option with require.context, but Webpack seems to 
- * assume that it won't because the primary output didn't change.)
+ * The i18n file is assumed to be a JavaScript module, to load JSON this 
+ * loader should be chained with `json-loader`.
  * 
- * @param source {string} - The JSON source of the messages file being required.
+ * @this {LoaderConfig}
+ * @param {string} source - The JSON source of the messages file being required.
  */
 module.exports = function(source) {
     this.cacheable && this.cacheable();
@@ -27,21 +58,12 @@ module.exports = function(source) {
     return compile.call(this, source, config);
 };
 
-
 /**
  * Returns a unique prefix specific to the intl module being loaded. This allows
- * messages to be unique.
+ * messages to be unique even if different modules export the same key.
  * 
- * If `config.shorten` is truthy, the prefix will be shortened but still kept
- * unique. 
- * 
- * This should be called with the Webpack loader context as the `this` object. 
- * 
- * @param {Object} config - The Webpack loader config.
- * @param {boolean} config.shorten - If truthy, the prefix will be shortened but 
- * still kept unique. This is disabled by default because this then makes the 
- * output dependent on the compilation order, which is an undesirable property 
- * if you rely on build hashes.
+ * @this {WebpackLoaderContext}
+ * @param {LoaderConfig} config - Our config.
  */
 function getPrefix(config) {
     const prefix = 
@@ -55,12 +77,14 @@ function getPrefix(config) {
 }
 
 /**
- * Parses the source into JSON and verifies its structure.
+ * Parses the source into a JSON object and verifies its structure.
  * 
- * The source should be a JSON object nested
- * string fields. Other types of field are not allowed.
+ * The source should be a JSON object with nested string fields. 
+ * Other types of field are not allowed.
  * 
+ * @this {WebpackLoaderContext}
  * @param {string} source - The source string passed in by Webpack.
+ * @return {Object} - The parsed JSON.
  */
 function parseSource(source) {
     const json = this.exec(source, this.resourcePath);
@@ -68,6 +92,13 @@ function parseSource(source) {
     if (typeof json !== "object")
         throw new Error("Locale data must be an object");
     
+    /**
+     * Recursively checks the validity of a parsed i18n file.
+     * @param {Object} obj - the current part of the file being verified.
+     * @param {string} path
+     *  The nested path to the current part of the file, to 
+     *  help produce more useful error messages.
+     */
     function check(obj, path) {
         for (let key in obj) {
             // TODO Maybe validate that top-level keys are valid 
@@ -77,8 +108,8 @@ function parseSource(source) {
                 case "string": break;
                 case "object": check(obj[key], path + "." + key); break;
                 default:
-                    throw new Error(path + "." + key + 
-                        ": values in a Locale JSON object must be strings or objects");
+                    throw new TypeError(path + "." + key + 
+                        ": values in a locale file must be strings or objects");
             }
         }
     }
@@ -90,7 +121,8 @@ function parseSource(source) {
 /**
  * Gets the loader config.
  * 
- * This should be called with the Webpack loader context as the `this` object. 
+ * @this {WebpackConfig}
+ * @returns {LoaderConfig}
  */
 function getConfig() {
     return LoaderUtils.getLoaderConfig(this, "reactIntlModules");
@@ -105,11 +137,14 @@ function getConfig() {
  * Each language is exported as an object mapping message IDs to actual strings
  * in that language. 
  * 
+ * @this {WebpackLoaderContext}
  * @param {string} source - The source file's contents.
- * */
+ * @param {LoaderConfig} config - The loader config.
+ * @returns {string} The compiled JavaScript module.
+ */
 function compile(source, config) {
     const json = parseSource.call(this, source);
-    const prefix = getPrefix.call(this, getConfig.call(this));
+    const prefix = getPrefix.call(this, config);
     
     let ids = {};
     let langs = {};
