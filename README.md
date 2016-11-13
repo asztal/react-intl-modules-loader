@@ -187,7 +187,7 @@ such as sharing strings between components, and comments in your i18n files.
     // src/components/Widget/index.js
     import {save, send} from "react-intl-modules-loader!./intl.js";
 
-    ...
+    // ...
 
     <ActionButton messages={send}/> 
 ```
@@ -197,3 +197,60 @@ such as sharing strings between components, and comments in your i18n files.
 You don't have to define all of your different languages in the same file,
 as long as one of those language files has all the necessary keys. The 
 `combine` helper will merge all the files correctly.
+
+## Hot module replacement
+
+`react-intl-modules-loader` produces modules which have no imports and export 
+only immutable data, so it should be simple to hook it up to any hot module 
+replacement.
+
+If you're using `react-hot-loader` v3, you can re-require the context module, 
+re-run `combine()`, and re-render the `<AppContainer>` with the `<IntlProvider>` 
+inside, for example:
+
+```js
+    // src/messages.js
+    const combine = require("react-intl-modules-loader/combine");
+    export const locales = combine(require.context("./", true, /intl\.json$/));
+```
+
+```js
+    // src/intl.js
+    export const en = {
+        title: "My first app"
+    };
+```
+
+```js
+    // src/App.js
+    import React from "react";
+    import {title} from "./intl.js";
+    export const App = () => <h1><FormattedMessage id={title}/></h1>;
+```
+
+```js
+    // src/index.js
+    import {AppContainer} from "react-hot-loader";
+
+    function render() {
+        const {locales} = require("./messages");
+        const {App} = require("./App");
+
+        ReactDOM.render(
+            <AppContainer>
+                <IntlProvider locale={navigator.language}
+                              messages={locales[navigator.language] || locales.en}>
+                    <App/>
+                </IntlProvider>
+            </AppContainer>
+            document.getElementById("root")
+        )
+    }
+    render();
+
+    if (module.hot) {
+        module.hot.accept(render);
+        module.hot.accept("./messages", render);
+        module.hot.accept("./App", render);
+    }
+```
