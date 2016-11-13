@@ -242,7 +242,7 @@ inside, for example:
                               messages={locales[navigator.language] || locales.en}>
                     <App/>
                 </IntlProvider>
-            </AppContainer>
+            </AppContainer>,
             document.getElementById("root")
         )
     }
