@@ -106,10 +106,9 @@ function parseSource(source) {
             
             switch(typeof obj[key]) {
                 case "string": break;
-                case "object": check(obj[key], path + "." + key); break;
+                case "object": check(obj[key], `${path}.${key}`); break;
                 default:
-                    throw new TypeError(path + "." + key + 
-                        ": values in a locale file must be strings or objects");
+                    throw new TypeError(`${path}.${key}: values in a locale file must be strings or objects`);
             }
         }
     }
@@ -156,7 +155,7 @@ function compile(source, config) {
         for (let key in obj) {
             const value = obj[key];
             if (typeof value === "object") {
-                const nested = convert(obj[key], path + key + ".");
+                const nested = convert(obj[key], `${path}${key}.`);
                 ids[key] = nested.ids;
                 Object.assign(values, nested.values);
             } else {
@@ -169,14 +168,14 @@ function compile(source, config) {
     }
 
     for (let lang in json) {
-        let converted = convert(json[lang], prefix + ":");
+        let converted = convert(json[lang], `${prefix}:`);
         langs[lang] = converted.values;
         Object.assign(ids, converted.ids); 
     }
         
     return [
         ...Object.keys(ids).map(key =>
-            "export const " + key + "=" + JSON.stringify(ids[key])),
-        "export const $messages = " + JSON.stringify(langs)
+            `export const  ${key}=${JSON.stringify(ids[key])}`),
+       `export const $messages = ${JSON.stringify(langs)}`
     ].join(";");
 }
