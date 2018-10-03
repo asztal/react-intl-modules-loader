@@ -106,7 +106,7 @@ function parseSource(source) {
             
             switch(typeof obj[key]) {
                 case "string": break;
-                case "object": check(obj[key], `${path}."${key}`); break;
+                case "object": check(obj[key], `${path}.${key}`); break;
                 default:
                     throw new TypeError(`${path}.${key}: values in a locale file must be strings or objects`);
             }
@@ -155,7 +155,7 @@ function compile(source, config) {
         for (let key in obj) {
             const value = obj[key];
             if (typeof value === "object") {
-                const nested = convert(obj[key], `${path} + ${key}.`);
+                const nested = convert(obj[key], `${path}${key}.`);
                 ids[key] = nested.ids;
                 Object.assign(values, nested.values);
             } else {
